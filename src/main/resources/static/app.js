@@ -16,7 +16,7 @@ let API_BASE = (lsGet('apiBase') || DEFAULT_API).replace(/\/+$/, '');
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -92,6 +92,11 @@ function isActive(a) {
   return !saida || saida >= todayISO();
 }
 
+// Alocação ativa de um cuidador (ignorando, ao editar, a própria alocação)
+function alocacaoAtivaDoCuidador(cuidadorId, ignorarId) {
+  return state.alocacoes.find((a) => a.cuidador?.id === cuidadorId && a.id !== ignorarId && isActive(a));
+}
+
 const entities = {
   casas: {
     path: '/api/casas', title: 'Casas', description: 'Imóveis atendidos e seus responsáveis.',
@@ -122,6 +127,21 @@ const entities = {
       { label: 'Nome', get: (i) => i.nome },
       { label: 'Telefone', get: (i) => i.telefone || '—' },
       { label: 'CPF', get: (i) => i.cpf || '—' },
+      {
+        label: 'Disponibilidade',
+        get: (i) => {
+          if (state.errors.alocacoes) return '—';
+          const a = alocacaoAtivaDoCuidador(i.id);
+          return a ? `Indisponível (${refName('casas', a.casa)})` : 'Disponível';
+        },
+        html: (i) => {
+          if (state.errors.alocacoes) return '—';
+          const a = alocacaoAtivaDoCuidador(i.id);
+          return a
+              ? `<span class="badge warn">Indisponível</span><span class="sub">Alocado em ${esc(refName('casas', a.casa))}</span>`
+              : '<span class="badge ok">Disponível</span>';
+        },
+      },
     ],
     fields: [
       { name: 'nome', label: 'Nome', type: 'text', required: true },
@@ -166,14 +186,27 @@ const entities = {
     ],
     fields: [
       { name: 'casa', label: 'Casa', type: 'select', ref: 'casas', required: true, emptyHint: 'Cadastre uma casa antes de criar a alocação.' },
-      { name: 'cuidador', label: 'Cuidador', type: 'select', ref: 'cuidadores', required: true, emptyHint: 'Cadastre um cuidador antes de criar a alocação.' },
+      {
+        name: 'cuidador', label: 'Cuidador', type: 'select', ref: 'cuidadores', required: true,
+        emptyHint: 'Cadastre um cuidador antes de criar a alocação.',
+        optionDisabled: (o, item) => !!alocacaoAtivaDoCuidador(o.id, item?.id),
+        disabledSuffix: ' — indisponível',
+        allDisabledHint: 'Todos os cuidadores estão alocados no momento.',
+      },
       { row: [
-        { name: 'dataEntrada', label: 'Data de entrada', type: 'date', required: true },
-        { name: 'dataSaida', label: 'Data de saída', type: 'date', hint: 'Deixe em branco se ainda está em andamento.' },
-      ] },
+          { name: 'dataEntrada', label: 'Data de entrada', type: 'date', required: true },
+          { name: 'dataSaida', label: 'Data de saída', type: 'date', hint: 'Deixe em branco se ainda está em andamento.' },
+        ] },
       { name: 'observacoes', label: 'Observações', type: 'textarea' },
     ],
-    validate: (p) => (p.dataSaida && p.dataSaida < p.dataEntrada ? 'A data de saída não pode ser anterior à de entrada.' : null),
+    conflictMsg: 'Este cuidador já está alocado em outra casa.',
+    validate: (p, item) => {
+      if (p.dataSaida && p.dataSaida < p.dataEntrada) return 'A data de saída não pode ser anterior à de entrada.';
+      const ficaAtiva = !p.dataSaida || p.dataSaida >= todayISO();
+      const ocupado = p.cuidador && ficaAtiva && alocacaoAtivaDoCuidador(p.cuidador.id, item?.id);
+      if (ocupado) return `Este cuidador está indisponível: já está alocado em ${refName('casas', ocupado.casa)}. Encerre essa alocação (preenchendo a data de saída) antes de alocá-lo novamente.`;
+      return null;
+    },
     label: (i) => `${refName('cuidadores', i.cuidador)} em ${refName('casas', i.casa)}`,
   },
 
@@ -182,6 +215,7 @@ const entities = {
     newLabel: 'Novo vínculo', editLabel: 'Editar vínculo', noun: 'o vínculo', canEdit: true,
     emptyText: 'Nenhum vínculo registrado.',
     conflictMsg: 'Esta pessoa já está vinculada a esta casa.',
+    conflictOn500: true,
     columns: [
       { label: 'Casa', get: (i) => refName('casas', i.casa) },
       { label: 'Pessoa', get: (i) => refName('pessoas', i.pessoa) },
@@ -304,17 +338,17 @@ function renderDashboard(view) {
       <section class="panel">
         <div class="panel-head"><h2>Alocações em andamento</h2><span>${ativas.length}</span></div>
         ${state.errors.alocacoes ? errorPanel('alocacoes') : miniTable(
-          ['Casa', 'Cuidador', 'Desde'],
-          ativas.slice(0, 8).map((a) => [refName('casas', a.casa), refName('cuidadores', a.cuidador), fmtDate(a.dataEntrada)]),
-          'Nenhuma alocação ativa no momento.')}
+      ['Casa', 'Cuidador', 'Desde'],
+      ativas.slice(0, 8).map((a) => [refName('casas', a.casa), refName('cuidadores', a.cuidador), fmtDate(a.dataEntrada)]),
+      'Nenhuma alocação ativa no momento.')}
       </section>
 
       <section class="panel">
         <div class="panel-head"><h2>Casas sem cuidador</h2><span>${state.errors.casas || state.errors.alocacoes ? '' : semCuidador.length}</span></div>
         ${state.errors.casas ? errorPanel('casas') : state.errors.alocacoes ? '<div class="empty">Depende das alocações, que não carregaram.</div>' : miniTable(
-          ['Casa', 'Dono'],
-          semCuidador.slice(0, 8).map((c) => [c.nome, c.dono || '—']),
-          state.casas.length ? 'Todas as casas têm cuidador alocado.' : 'Nenhuma casa cadastrada.')}
+      ['Casa', 'Dono'],
+      semCuidador.slice(0, 8).map((c) => [c.nome, c.dono || '—']),
+      state.casas.length ? 'Todas as casas têm cuidador alocado.' : 'Nenhuma casa cadastrada.')}
       </section>
     </div>
 
@@ -360,8 +394,8 @@ function renderRows(key) {
 
   if (!items.length) {
     wrap.innerHTML = q
-      ? `<div class="empty"><strong>Nada encontrado</strong>Nenhum resultado para “${esc(searchTerm[key])}”.</div>`
-      : `<div class="empty"><strong>${esc(e.emptyText)}</strong>Use o botão “${esc(e.newLabel)}” para começar.</div>`;
+        ? `<div class="empty"><strong>Nada encontrado</strong>Nenhum resultado para “${esc(searchTerm[key])}”.</div>`
+        : `<div class="empty"><strong>${esc(e.emptyText)}</strong>Use o botão “${esc(e.newLabel)}” para começar.</div>`;
     return;
   }
 
@@ -431,11 +465,14 @@ function fieldHtml(f, item, key) {
   let control;
   let hint = f.hint || '';
   if (f.type === 'select') {
-    const opts = f.ref ? state[f.ref].map((o) => [o.id, entities[f.ref].label(o)]) : f.options;
+    const opts = f.ref
+        ? state[f.ref].map((o) => [o.id, entities[f.ref].label(o), !!(f.optionDisabled && f.optionDisabled(o, item))])
+        : f.options.map(([v, l]) => [v, l, false]);
     if (f.ref && !opts.length) hint = f.emptyHint || '';
+    else if (f.ref && opts.every((o) => o[2])) hint = f.allDisabledHint || '';
     control = `<select ${attrs}>
       <option value="">Selecione…</option>
-      ${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+      ${opts.map(([v, l, off]) => `<option value="${esc(v)}" ${off ? 'disabled' : ''} ${String(v) === String(val) ? 'selected' : ''}>${esc(l + (off ? (f.disabledSuffix || '') : ''))}</option>`).join('')}
     </select>`;
   } else if (f.type === 'textarea') {
     control = `<textarea ${attrs}>${esc(val)}</textarea>`;
@@ -494,7 +531,7 @@ form.addEventListener('submit', async (ev) => {
   if (!form.checkValidity()) { form.reportValidity(); return; }
 
   const payload = buildPayload(e);
-  const invalid = e.validate && e.validate(payload);
+  const invalid = e.validate && e.validate(payload, item);
   if (invalid) { errBox.textContent = invalid; errBox.hidden = false; return; }
 
   const btn = $('#formSubmit');
@@ -507,7 +544,7 @@ form.addEventListener('submit', async (ev) => {
     toast(item ? 'Alterações salvas.' : 'Cadastro salvo.');
     await refresh();
   } catch (err) {
-    errBox.textContent = (err.status === 500 && e.conflictMsg) ? e.conflictMsg : err.message;
+    errBox.textContent = (e.conflictMsg && (err.status === 409 || (err.status === 500 && e.conflictOn500))) ? e.conflictMsg : err.message;
     errBox.hidden = false;
     btn.disabled = false;
     btn.textContent = 'Salvar';
