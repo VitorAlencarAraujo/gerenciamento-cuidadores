@@ -14,8 +14,24 @@ public class Cuidador {
     private String telefone;
     private String cpf;
 
+    public Cuidador(int id, String nome, String telefone, String cpf) {
+        this.id = id;
+        this.nome = nome;
+        this.telefone = telefone;
+        this.cpf = cpf;
+    }
 
-//    Getters e Setters
+    public Cuidador(String nome, String telefone, String cpf) {
+        this.nome = nome;
+        this.telefone = telefone;
+        this.cpf = cpf;
+    }
+
+    public Cuidador(){
+
+    }
+
+    //    Getters e Setters
 
     public int getId() {
         return id;

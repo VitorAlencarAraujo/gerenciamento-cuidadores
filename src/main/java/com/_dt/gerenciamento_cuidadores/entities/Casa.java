@@ -15,7 +15,6 @@ public class Casa {
     private String dono;
     private double valor;
 
-//    Getters e Setters
 
     public Casa(int id, String nome, String endereco, String dono, double valor) {
         this.id = id;
@@ -35,6 +34,8 @@ public class Casa {
     public Casa(){
 
     }
+
+    //    Getters e Setters
 
     public int getId() {
         return id;
