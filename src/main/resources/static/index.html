@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gerenciamento de Cuidadores</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">
+        <span class="brand-name">Cuidadores</span>
+        <span class="brand-sub">Gestão de casas e equipes</span>
+      </div>
+
+      <nav id="nav" aria-label="Seções"></nav>
+
+      <div class="api-box">
+        <label for="apiBase">Endereço da API</label>
+        <div class="api-row">
+          <input id="apiBase" type="url" placeholder="http://localhost:8080" spellcheck="false">
+          <button id="saveApi" class="btn small" type="button">Salvar</button>
+        </div>
+        <p id="apiStatus" class="api-status" role="status">Verificando conexão…</p>
+      </div>
+    </aside>
+
+    <main id="view" tabindex="-1"></main>
+  </div>
+
+  <!-- Formulário (criar / editar) -->
+  <dialog id="formDialog" aria-labelledby="formTitle">
+    <form id="entityForm" novalidate>
+      <header class="dlg-head">
+        <h2 id="formTitle"></h2>
+        <button type="button" class="icon-btn" id="formClose" aria-label="Fechar">✕</button>
+      </header>
+      <div id="formFields" class="dlg-body"></div>
+      <p id="formError" class="form-error" role="alert" hidden></p>
+      <footer class="dlg-foot">
+        <button type="button" class="btn ghost" id="formCancel">Cancelar</button>
+        <button type="submit" class="btn primary" id="formSubmit">Salvar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Confirmação de exclusão -->
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle">
+    <form method="dialog">
+      <header class="dlg-head"><h2 id="confirmTitle">Confirmar exclusão</h2></header>
+      <div class="dlg-body"><p id="confirmText"></p></div>
+      <footer class="dlg-foot">
+        <button value="cancel" class="btn ghost">Cancelar</button>
+        <button value="ok" class="btn danger">Excluir</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
