@@ -12,8 +12,9 @@ let API_BASE = (lsGet('apiBase') || DEFAULT_API).replace(/\/+$/, '');
 
 /* ==========================================================================
    Utilidades
+   (o helper de seletor se chama "qs" para não colidir com o "$" do jQuery)
    ========================================================================== */
-const $ = (sel, root = document) => root.querySelector(sel);
+const qs = (sel, root = document) => root.querySelector(sel);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -37,8 +38,92 @@ function toast(msg, type = 'ok') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.textContent = msg;
-  $('#toasts').appendChild(el);
+  qs('#toasts').appendChild(el);
   setTimeout(() => el.remove(), type === 'err' ? 6500 : 3500);
+}
+
+/* ==========================================================================
+   Validação e formatação (CPF, telefone, CEP, e-mail, data)
+   ========================================================================== */
+const onlyDigits = (s) => String(s ?? '').replace(/\D/g, '');
+
+function cpfValido(cpf) {
+  const d = onlyDigits(cpf);
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false; // 111.111.111-11 etc.
+  const dv = (len) => {
+    let soma = 0;
+    for (let i = 0; i < len; i++) soma += Number(d[i]) * (len + 1 - i);
+    const r = (soma * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+
+const emailValido = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+
+// dd/mm/aaaa -> "yyyy-MM-dd" (ou '' se a data não existir)
+function brToIso(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s).trim());
+  if (!m) return '';
+  const [, dd, mm, yyyy] = m;
+  const d = Number(dd), mo = Number(mm), y = Number(yyyy);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  const real = dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+  return real && y >= 1900 && y <= 2100 ? `${yyyy}-${mm}-${dd}` : '';
+}
+const isoToBr = (iso) => { const d = normDate(iso); return d ? d.split('-').reverse().join('/') : ''; };
+
+// Formatam valores já salvos para exibir dentro dos campos mascarados
+function fmtCpf(v) {
+  const d = onlyDigits(v);
+  return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : (v ?? '');
+}
+function fmtPhone(v) {
+  const d = onlyDigits(v);
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return v ?? '';
+}
+const fmtCep = (v) => { const d = onlyDigits(v); return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : (v ?? ''); };
+
+const FORMATTERS = { cpf: fmtCpf, phone: fmtPhone, cep: fmtCep, date: isoToBr };
+
+// Cada validador devolve '' (ok) ou a mensagem de erro. Só roda em campo preenchido.
+const VALIDATORS = {
+  cpf: (v) => (cpfValido(v) ? '' : 'CPF inválido. Confira os números.'),
+  phone: (v) => ([10, 11].includes(onlyDigits(v).length) ? '' : 'Telefone inválido. Use (DD) 99999-9999.'),
+  cep: (v) => (onlyDigits(v).length === 8 ? '' : 'CEP inválido. Use 00000-000.'),
+  email: (v) => (emailValido(v) ? '' : 'E-mail inválido. Use nome@exemplo.com.'),
+  date: (v) => (brToIso(v) ? '' : 'Data inválida. Use dd/mm/aaaa.'),
+};
+
+/* Máscaras (jQuery Mask Plugin) */
+const HAS_MASK = !!(window.jQuery && window.jQuery.fn && window.jQuery.fn.mask);
+
+function applyMask(el) {
+  if (!HAS_MASK || el.dataset.masked) return;
+  const $el = window.jQuery(el);
+  switch (el.dataset.mask) {
+    case 'cpf': $el.mask('000.000.000-00', { reverse: true }); break;
+    case 'date': $el.mask('00/00/0000'); break;
+    case 'cep': $el.mask('00000-000'); break;
+    case 'phone': {
+      // 11 dígitos = celular (00000-0000); até 10 = fixo (0000-0000)
+      const behavior = (v) => (v.replace(/\D/g, '').length > 10 ? '(00) 00000-0000' : '(00) 0000-00009');
+      $el.mask(behavior, { onKeyPress: (v, e, field, opts) => field.mask(behavior(v), opts) });
+      break;
+    }
+    default: return;
+  }
+  el.dataset.masked = '1';
+}
+const applyMasks = (root) => root.querySelectorAll('[data-mask]').forEach(applyMask);
+
+function validateInput(el) {
+  const type = el.dataset.v;
+  if (!type || !VALIDATORS[type]) return;
+  const v = el.value.trim();
+  el.setCustomValidity(v ? VALIDATORS[type](v) : '');
 }
 
 /* ==========================================================================
@@ -78,12 +163,9 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 /* ==========================================================================
-   Definição das entidades (uma tabela de configuração gera telas e formulários)
+   Estado
    ========================================================================== */
-const TIPOS_VINCULO = [['PROPRIETARIO', 'Proprietário'], ['SOCIO', 'Sócio']];
-const tipoLabel = (v) => (TIPOS_VINCULO.find(([k]) => k === v) || [, v])[1];
-
-const state = { casas: [], cuidadores: [], pessoas: [], alocacoes: [], vinculos: [], errors: {} };
+const state = { casas: [], cuidadores: [], alocacoes: [], errors: {} };
 const byId = (key, id) => state[key].find((x) => x.id === id);
 const refName = (key, ref) => (ref ? (ref.nome || byId(key, ref.id)?.nome || `#${ref.id}`) : '—');
 
@@ -97,34 +179,89 @@ function alocacaoAtivaDoCuidador(cuidadorId, ignorarId) {
   return state.alocacoes.find((a) => a.cuidador?.id === cuidadorId && a.id !== ignorarId && isActive(a));
 }
 
+/* Avatar: foto (data URL de imagem) ou iniciais */
+const initials = (nome) => String(nome || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+function avatar(nome, foto, large = false, id = '') {
+  const cls = `avatar${large ? ' lg' : ''}`;
+  const idAttr = id ? ` id="${id}"` : '';
+  if (foto && /^data:image\//.test(foto)) return `<img class="${cls}"${idAttr} src="${esc(foto)}" alt="">`;
+  return `<span class="${cls}"${idAttr} aria-hidden="true">${esc(initials(nome))}</span>`;
+}
+
+/* Donos: derivados das casas (agrupa pelo nome do dono, ignorando acento/caixa) */
+const normName = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+function groupDonos() {
+  const map = new Map();
+  state.casas.forEach((c) => {
+    const nome = (c.dono || '').trim();
+    const key = normName(nome);
+    if (!map.has(key)) map.set(key, { nome, telefones: new Set(), emails: new Set(), casas: [] });
+    const g = map.get(key);
+    if (c.donoTelefone) g.telefones.add(c.donoTelefone);
+    if (c.donoEmail) g.emails.add(c.donoEmail);
+    g.casas.push(c);
+  });
+  return [...map.values()].sort((a, b) => {
+    if (!a.nome !== !b.nome) return a.nome ? -1 : 1; // "sem dono" por último
+    return a.nome.localeCompare(b.nome, 'pt-BR');
+  });
+}
+const donosNomeados = () => groupDonos().filter((g) => g.nome);
+
+/* ==========================================================================
+   Definição das entidades (uma tabela de configuração gera telas e formulários)
+   ========================================================================== */
 const entities = {
   casas: {
-    path: '/api/casas', title: 'Casas', description: 'Imóveis atendidos e seus responsáveis.',
-    newLabel: 'Nova casa', editLabel: 'Editar casa', noun: 'a casa', canEdit: false,
+    path: '/api/casas', title: 'Casas', description: 'Imóveis atendidos, seus donos e sócios.',
+    newLabel: 'Nova casa', editLabel: 'Editar casa', noun: 'a casa', canEdit: true,
     emptyText: 'Nenhuma casa cadastrada.',
-    inUseMsg: 'Esta casa tem alocações ou vínculos e não pode ser excluída. Remova-os primeiro.',
+    inUseMsg: 'Esta casa tem alocações e não pode ser excluída. Remova-as primeiro.',
     columns: [
       { label: 'Nome', get: (i) => i.nome },
-      { label: 'Endereço', get: (i) => i.endereco },
-      { label: 'Dono', get: (i) => i.dono },
+      {
+        label: 'Endereço', get: (i) => [i.endereco, i.cep].filter(Boolean).join(' '),
+        html: (i) => `${esc(i.endereco || '—')}${i.cep ? `<span class="sub">CEP ${esc(i.cep)}</span>` : ''}`,
+      },
+      {
+        label: 'Dono', get: (i) => [i.dono, i.donoTelefone, i.donoEmail].filter(Boolean).join(' '),
+        html: (i) => `${esc(i.dono || '—')}${[i.donoTelefone, i.donoEmail].filter(Boolean).map((x) => `<span class="sub">${esc(x)}</span>`).join('')}`,
+      },
+      {
+        label: 'Sócios', get: (i) => (i.socios || []).map((s) => s.nome).join(', '),
+        html: (i) => ((i.socios || []).length ? esc(i.socios.map((s) => s.nome).join(', ')) : '—'),
+      },
       { label: 'Valor', get: (i) => brl.format(i.valor ?? 0), cls: 'num' },
     ],
     fields: [
       { name: 'nome', label: 'Nome da casa', type: 'text', required: true },
-      { name: 'endereco', label: 'Endereço', type: 'text' },
-      { name: 'dono', label: 'Dono', type: 'text' },
+      { row: [
+          { name: 'endereco', label: 'Endereço', type: 'text' },
+          { name: 'cep', label: 'CEP', type: 'text', mask: 'cep', placeholder: '00000-000', inputmode: 'numeric' },
+        ], cls: 'row-21' },
       { name: 'valor', label: 'Valor (R$)', type: 'number', step: '0.01', min: '0', number: true },
+      { type: 'heading', label: 'Dono da casa' },
+      { name: 'dono', label: 'Nome do dono', type: 'text' },
+      { row: [
+          { name: 'donoTelefone', label: 'Telefone do dono', type: 'tel', mask: 'phone', placeholder: '(11) 91234-5678', inputmode: 'tel' },
+          { name: 'donoEmail', label: 'E-mail do dono', type: 'email', validate: 'email', placeholder: 'nome@exemplo.com' },
+        ] },
+      { type: 'socios', name: 'socios' },
     ],
     label: (i) => i.nome,
   },
 
   cuidadores: {
     path: '/api/cuidadores', title: 'Cuidadores', description: 'Profissionais disponíveis para alocação.',
-    newLabel: 'Novo cuidador', editLabel: 'Editar cuidador', noun: 'o cuidador', canEdit: false,
+    newLabel: 'Novo cuidador', editLabel: 'Editar cuidador', noun: 'o cuidador', canEdit: true,
     emptyText: 'Nenhum cuidador cadastrado.',
     inUseMsg: 'Este cuidador possui alocações e não pode ser excluído. Remova-as primeiro.',
     columns: [
-      { label: 'Nome', get: (i) => i.nome },
+      {
+        label: 'Nome', get: (i) => i.nome,
+        html: (i) => `<div class="person">${avatar(i.nome, i.foto)}<span>${esc(i.nome)}</span></div>`,
+      },
       { label: 'Telefone', get: (i) => i.telefone || '—' },
       { label: 'CPF', get: (i) => i.cpf || '—' },
       {
@@ -144,27 +281,10 @@ const entities = {
       },
     ],
     fields: [
+      { type: 'foto', name: 'foto', label: 'Foto (opcional)' },
       { name: 'nome', label: 'Nome', type: 'text', required: true },
-      { name: 'telefone', label: 'Telefone', type: 'tel', placeholder: '(11) 91234-5678' },
-      { name: 'cpf', label: 'CPF', type: 'text', placeholder: '000.000.000-00', inputmode: 'numeric' },
-    ],
-    label: (i) => i.nome,
-  },
-
-  pessoas: {
-    path: '/api/pessoas', title: 'Pessoas', description: 'Proprietários e sócios das casas.',
-    newLabel: 'Nova pessoa', editLabel: 'Editar pessoa', noun: 'a pessoa', canEdit: false,
-    emptyText: 'Nenhuma pessoa cadastrada.',
-    inUseMsg: 'Esta pessoa está vinculada a uma casa e não pode ser excluída. Remova o vínculo primeiro.',
-    columns: [
-      { label: 'Nome', get: (i) => i.nome },
-      { label: 'Telefone', get: (i) => i.telefone || '—' },
-      { label: 'E-mail', get: (i) => i.email || '—' },
-    ],
-    fields: [
-      { name: 'nome', label: 'Nome', type: 'text', required: true },
-      { name: 'telefone', label: 'Telefone', type: 'tel' },
-      { name: 'email', label: 'E-mail', type: 'email' },
+      { name: 'telefone', label: 'Telefone', type: 'tel', mask: 'phone', placeholder: '(11) 91234-5678', inputmode: 'tel' },
+      { name: 'cpf', label: 'CPF', type: 'text', mask: 'cpf', placeholder: '000.000.000-00', inputmode: 'numeric' },
     ],
     label: (i) => i.nome,
   },
@@ -209,28 +329,6 @@ const entities = {
     },
     label: (i) => `${refName('cuidadores', i.cuidador)} em ${refName('casas', i.casa)}`,
   },
-
-  vinculos: {
-    path: '/api/casa-pessoas', title: 'Vínculos', description: 'Relação entre pessoas e casas (proprietário ou sócio).',
-    newLabel: 'Novo vínculo', editLabel: 'Editar vínculo', noun: 'o vínculo', canEdit: true,
-    emptyText: 'Nenhum vínculo registrado.',
-    conflictMsg: 'Esta pessoa já está vinculada a esta casa.',
-    conflictOn500: true,
-    columns: [
-      { label: 'Casa', get: (i) => refName('casas', i.casa) },
-      { label: 'Pessoa', get: (i) => refName('pessoas', i.pessoa) },
-      {
-        label: 'Tipo', get: (i) => tipoLabel(i.tipoVinculo),
-        html: (i) => `<span class="badge ${i.tipoVinculo === 'PROPRIETARIO' ? 'brand' : 'warn'}">${esc(tipoLabel(i.tipoVinculo))}</span>`,
-      },
-    ],
-    fields: [
-      { name: 'casa', label: 'Casa', type: 'select', ref: 'casas', required: true, emptyHint: 'Cadastre uma casa antes de criar o vínculo.' },
-      { name: 'pessoa', label: 'Pessoa', type: 'select', ref: 'pessoas', required: true, emptyHint: 'Cadastre uma pessoa antes de criar o vínculo.' },
-      { name: 'tipoVinculo', label: 'Tipo de vínculo', type: 'select', options: TIPOS_VINCULO, required: true },
-    ],
-    label: (i) => `${refName('pessoas', i.pessoa)} — ${refName('casas', i.casa)}`,
-  },
 };
 
 const NAV = [
@@ -238,8 +336,7 @@ const NAV = [
   { key: 'casas', label: 'Casas' },
   { key: 'cuidadores', label: 'Cuidadores' },
   { key: 'alocacoes', label: 'Alocações' },
-  { key: 'pessoas', label: 'Pessoas' },
-  { key: 'vinculos', label: 'Vínculos' },
+  { key: 'donos', label: 'Donos e sócios' },
 ];
 
 /* ==========================================================================
@@ -263,7 +360,7 @@ async function loadAll() {
 
   const offline = results.every((r) => r.status === 'rejected' && r.reason.status === 0);
   const partial = results.some((r) => r.status === 'rejected');
-  const el = $('#apiStatus');
+  const el = qs('#apiStatus');
   el.className = 'api-status ' + (offline ? 'off' : 'on');
   el.textContent = offline ? 'Sem conexão com a API' : partial ? 'Conectado, com erros' : 'Conectado';
 }
@@ -282,10 +379,17 @@ function currentKey() {
   return NAV.some((n) => n.key === k) ? k : 'inicio';
 }
 
+function navCount(key) {
+  if (key === 'inicio' || !loaded) return null;
+  if (key === 'donos') return state.errors.casas ? null : donosNomeados().length;
+  return state.errors[key] ? null : state[key].length;
+}
+
 function renderNav() {
   const cur = currentKey();
-  $('#nav').innerHTML = NAV.map((n) => {
-    const count = n.key !== 'inicio' && loaded && !state.errors[n.key] ? `<span class="count">${state[n.key].length}</span>` : '';
+  qs('#nav').innerHTML = NAV.map((n) => {
+    const c = navCount(n.key);
+    const count = c === null ? '' : `<span class="count">${c}</span>`;
     return `<a href="#/${n.key}" ${n.key === cur ? 'aria-current="page"' : ''}>${esc(n.label)}${count}</a>`;
   }).join('');
 }
@@ -293,7 +397,7 @@ function renderNav() {
 function route() {
   const key = currentKey();
   renderNav();
-  const view = $('#view');
+  const view = qs('#view');
   document.title = `${NAV.find((n) => n.key === key).label} · Cuidadores`;
 
   if (!loaded) {
@@ -301,6 +405,7 @@ function route() {
     return;
   }
   if (key === 'inicio') renderDashboard(view);
+  else if (key === 'donos') renderDonos(view);
   else renderEntity(view, key);
 }
 
@@ -310,8 +415,8 @@ function route() {
 function errorPanel(key) {
   const err = state.errors[key];
   let extra = '';
-  if (err.status === 500 && (key === 'alocacoes' || key === 'vinculos')) {
-    extra = ' Se o erro persistir, é provável que a serialização das relações LAZY esteja falhando no back-end (veja o README).';
+  if (err.status === 500 && key === 'alocacoes') {
+    extra = ' Se o erro persistir, é provável que a serialização das relações LAZY esteja falhando no back-end.';
   }
   return `<div class="state-msg error"><strong>Não foi possível carregar ${esc(entities[key].title.toLowerCase())}</strong>${esc(err.message)}${extra}<br><button class="btn" data-retry>Tentar de novo</button></div>`;
 }
@@ -331,7 +436,7 @@ function renderDashboard(view) {
       ${stat('casas', 'Casas', state.casas.length)}
       ${stat('cuidadores', 'Cuidadores', state.cuidadores.length)}
       ${stat('alocacoes', 'Alocações ativas', ativas.length)}
-      ${stat('pessoas', 'Pessoas', state.pessoas.length)}
+      ${stat('donos', 'Donos', state.errors.casas ? '—' : donosNomeados().length)}
     </div>
 
     <div class="two-col">
@@ -365,6 +470,65 @@ function miniTable(heads, rows, emptyText) {
 }
 
 /* ==========================================================================
+   Donos e sócios
+   ========================================================================== */
+function renderDonos(view) {
+  view.innerHTML = `
+    <div class="page-head">
+      <div><h1>Donos e sócios</h1><p>Quem é dono de cada casa e quem são os sócios. Para alterar, edite a casa.</p></div>
+      <button class="btn primary" data-new>Nova casa</button>
+    </div>
+    ${state.errors.casas ? `<section class="panel">${errorPanel('casas')}</section>` : `
+      <div class="toolbar panel" style="margin-bottom:16px;border-bottom:1px solid var(--line)"><input type="search" id="search" placeholder="Buscar por dono, casa ou sócio…" aria-label="Buscar" value="${esc(searchTerm.donos || '')}"></div>
+      <div class="donos" id="donosList"></div>`}`;
+  if (!state.errors.casas) renderDonosList();
+}
+
+function socioChip(s) {
+  const contato = [s.telefone, s.email].filter(Boolean).map(esc).join(' · ');
+  return `<span class="chip">${esc(s.nome)}${contato ? `<small>${contato}</small>` : ''}</span>`;
+}
+
+function renderDonosList() {
+  const q = normName(searchTerm.donos || '');
+  const grupos = groupDonos().filter((g) => !q || normName([
+    g.nome, ...g.casas.map((c) => c.nome), ...g.casas.flatMap((c) => (c.socios || []).map((s) => s.nome)),
+  ].join(' ')).includes(q));
+  const box = qs('#donosList');
+
+  if (!grupos.length) {
+    box.innerHTML = q
+        ? `<div class="empty panel"><strong>Nada encontrado</strong>Nenhum resultado para “${esc(searchTerm.donos)}”.</div>`
+        : '<div class="empty panel"><strong>Nenhum dono cadastrado.</strong>Informe o dono ao cadastrar uma casa.</div>';
+    return;
+  }
+
+  box.innerHTML = grupos.map((g) => {
+    const contatos = [...g.telefones, ...g.emails];
+    return `<article class="dono-card">
+      <header class="dono-head">
+        ${avatar(g.nome || '?', null, true)}
+        <div class="info">
+          <h2>${esc(g.nome || 'Sem dono informado')}</h2>
+          <div class="contact">${contatos.length ? contatos.map((c) => `<span>${esc(c)}</span>`).join('') : '<span>Sem contato cadastrado</span>'}</div>
+        </div>
+        <span class="badge brand">${g.casas.length} ${g.casas.length === 1 ? 'casa' : 'casas'}</span>
+      </header>
+      ${g.casas.map((c) => `<div class="dono-casa">
+        <div class="casa-line">
+          <div><strong>${esc(c.nome)}</strong><div class="meta">${esc(c.endereco || 'Sem endereço')}${c.cep ? ` · CEP ${esc(c.cep)}` : ''} · ${esc(brl.format(c.valor ?? 0))}</div></div>
+          <button class="btn row-btn" data-edit-casa="${c.id}">Editar casa</button>
+        </div>
+        <div class="socios-box">
+          <span class="lbl">Sócios</span>
+          ${(c.socios || []).length ? c.socios.map(socioChip).join('') : '<span class="no-socios">Nenhum sócio cadastrado.</span>'}
+        </div>
+      </div>`).join('')}
+    </article>`;
+  }).join('');
+}
+
+/* ==========================================================================
    Telas de listagem (genéricas)
    ========================================================================== */
 const searchTerm = {};
@@ -390,7 +554,7 @@ function renderRows(key) {
   const e = entities[key];
   const q = (searchTerm[key] || '').trim().toLowerCase();
   const items = state[key].filter((i) => !q || e.columns.some((c) => String(c.get(i)).toLowerCase().includes(q)));
-  const wrap = $('#tableWrap');
+  const wrap = qs('#tableWrap');
 
   if (!items.length) {
     wrap.innerHTML = q
@@ -417,12 +581,19 @@ function renderRows(key) {
 }
 
 /* Eventos da área principal (delegação) */
-$('#view').addEventListener('click', (ev) => {
+qs('#view').addEventListener('click', (ev) => {
   const key = currentKey();
   if (ev.target.closest('[data-retry]')) { refresh(); return; }
   if (key === 'inicio') return;
 
-  if (ev.target.closest('[data-new]')) { openForm(key, null); return; }
+  if (ev.target.closest('[data-new]')) { openForm(key === 'donos' ? 'casas' : key, null); return; }
+
+  if (key === 'donos') {
+    const btn = ev.target.closest('[data-edit-casa]');
+    const casa = btn && state.casas.find((c) => String(c.id) === btn.dataset.editCasa);
+    if (casa) openForm('casas', casa);
+    return;
+  }
 
   const row = ev.target.closest('tr[data-id]');
   if (!row) return;
@@ -432,33 +603,78 @@ $('#view').addEventListener('click', (ev) => {
   if (ev.target.closest('[data-del]')) removeItem(key, item);
 });
 
-$('#view').addEventListener('input', (ev) => {
-  if (ev.target.id === 'search') {
-    searchTerm[currentKey()] = ev.target.value;
-    renderRows(currentKey());
-  }
+qs('#view').addEventListener('input', (ev) => {
+  if (ev.target.id !== 'search') return;
+  const key = currentKey();
+  searchTerm[key] = ev.target.value;
+  if (key === 'donos') renderDonosList();
+  else renderRows(key);
 });
 
 /* ==========================================================================
    Formulário (criar / editar)
    ========================================================================== */
-const formDlg = $('#formDialog');
-const form = $('#entityForm');
-let editing = null; // { key, item }
+const formDlg = qs('#formDialog');
+const form = qs('#entityForm');
+let editing = null;   // { key, item }
+let formFoto = null;  // foto atual do formulário (data URL ou null)
 
-function fieldHtml(f, item, key) {
-  if (f.row) return `<div class="row-2">${f.row.map((x) => fieldHtml(x, item, key)).join('')}</div>`;
+function socioRowHtml(s = {}) {
+  return `<div class="socio-row">
+    <div class="row-head"><span>Sócio</span><button type="button" class="icon-btn" data-del-socio aria-label="Remover sócio">✕</button></div>
+    <input class="s-nome" type="text" placeholder="Nome do sócio" value="${esc(s.nome || '')}" aria-label="Nome do sócio">
+    <div class="row-2">
+      <input class="s-tel" type="tel" data-mask="phone" data-v="phone" inputmode="tel" placeholder="Telefone (opcional)" value="${esc(fmtPhone(s.telefone))}" aria-label="Telefone do sócio">
+      <input class="s-email" type="email" data-v="email" placeholder="E-mail (opcional)" value="${esc(s.email || '')}" aria-label="E-mail do sócio">
+    </div>
+  </div>`;
+}
+
+function fieldHtml(f, item) {
+  if (f.row) return `<div class="${f.cls || 'row-2'}">${f.row.map((x) => fieldHtml(x, item)).join('')}</div>`;
+  if (f.type === 'heading') return `<h3 class="form-sub">${esc(f.label)}</h3>`;
+
+  if (f.type === 'socios') {
+    const lista = item?.socios || [];
+    return `<div class="field" id="sociosField">
+      <div class="socios-head">
+        <h3>Sócios do dono</h3>
+        <button type="button" class="btn row-btn" data-add-socio>+ Adicionar sócio</button>
+      </div>
+      <p class="hint">Opcional. Informe nome, telefone e e-mail de cada sócio.</p>
+      <div class="socios-list" id="sociosList">${lista.map(socioRowHtml).join('')}</div>
+    </div>`;
+  }
+
+  if (f.type === 'foto') {
+    return `<div class="field">
+      <span class="foto-label">${esc(f.label)}</span>
+      <div class="foto-row">
+        <span id="fotoPreview">${avatar(item?.nome, formFoto, true)}</span>
+        <div>
+          <input type="file" id="f_foto" accept="image/*" hidden>
+          <button type="button" class="btn row-btn" data-foto-choose>${formFoto ? 'Trocar foto' : 'Escolher foto'}</button>
+          <button type="button" class="btn row-btn del" data-foto-remove ${formFoto ? '' : 'hidden'}>Remover</button>
+          <p class="hint">JPG, PNG ou WebP. A imagem é reduzida automaticamente.</p>
+        </div>
+      </div>
+    </div>`;
+  }
 
   const id = `f_${f.name}`;
   let val = item ? (f.ref ? item[f.name]?.id : item[f.name]) : '';
-  if (f.type === 'date') val = normDate(val);
+  const maskType = f.mask || (f.type === 'date' ? 'date' : '');
   if (val === null || val === undefined) val = '';
+  if (maskType && FORMATTERS[maskType]) val = FORMATTERS[maskType](val);
 
+  const validateType = f.validate || maskType;
   const attrs = [
     `id="${id}"`, `name="${f.name}"`,
     f.required ? 'required' : '',
-    f.placeholder ? `placeholder="${esc(f.placeholder)}"` : '',
-    f.inputmode ? `inputmode="${f.inputmode}"` : '',
+    f.placeholder ? `placeholder="${esc(f.placeholder)}"` : (f.type === 'date' ? 'placeholder="dd/mm/aaaa"' : ''),
+    f.inputmode ? `inputmode="${f.inputmode}"` : (f.type === 'date' ? 'inputmode="numeric"' : ''),
+    maskType ? `data-mask="${maskType}"` : '',
+    validateType && VALIDATORS[validateType] ? `data-v="${validateType}"` : '',
     f.step ? `step="${f.step}"` : '', f.min ? `min="${f.min}"` : '',
   ].join(' ');
 
@@ -477,7 +693,8 @@ function fieldHtml(f, item, key) {
   } else if (f.type === 'textarea') {
     control = `<textarea ${attrs}>${esc(val)}</textarea>`;
   } else {
-    control = `<input type="${f.type}" ${attrs} value="${esc(val)}">`;
+    // datas viram texto com máscara dd/mm/aaaa
+    control = `<input type="${f.type === 'date' ? 'text' : f.type}" ${attrs} value="${esc(val)}">`;
   }
 
   return `<div class="field">
@@ -489,31 +706,135 @@ function fieldHtml(f, item, key) {
 
 const flatFields = (fields) => fields.flatMap((f) => (f.row ? f.row : [f]));
 
+function validateSocios() {
+  form.querySelectorAll('.socio-row').forEach((row) => {
+    const nome = qs('.s-nome', row);
+    const outros = qs('.s-tel', row).value.trim() || qs('.s-email', row).value.trim();
+    nome.setCustomValidity(!nome.value.trim() && outros ? 'Informe o nome do sócio.' : '');
+  });
+}
+
+function validateAll() {
+  form.querySelectorAll('[data-v]').forEach(validateInput);
+  validateSocios();
+}
+
 function openForm(key, item) {
   const e = entities[key];
   editing = { key, item };
-  $('#formTitle').textContent = item ? e.editLabel : e.newLabel;
-  $('#formFields').innerHTML = e.fields.map((f) => fieldHtml(f, item, key)).join('');
-  $('#formError').hidden = true;
-  $('#formSubmit').disabled = false;
-  $('#formSubmit').textContent = 'Salvar';
+  formFoto = item?.foto || null;
+  qs('#formTitle').textContent = item ? e.editLabel : e.newLabel;
+  qs('#formFields').innerHTML = e.fields.map((f) => fieldHtml(f, item)).join('');
+  applyMasks(qs('#formFields'));
+  validateAll();
+  qs('#formError').hidden = true;
+  qs('#formSubmit').disabled = false;
+  qs('#formSubmit').textContent = 'Salvar';
   formDlg.showModal();
-  const first = $('#formFields input, #formFields select, #formFields textarea');
+  const first = qs('#formFields input:not([type=file]), #formFields select, #formFields textarea');
   if (first) first.focus();
 }
 
-function closeForm() { formDlg.close(); editing = null; }
-$('#formClose').addEventListener('click', closeForm);
-$('#formCancel').addEventListener('click', closeForm);
+function closeForm() { formDlg.close(); editing = null; formFoto = null; }
+qs('#formClose').addEventListener('click', closeForm);
+qs('#formCancel').addEventListener('click', closeForm);
 formDlg.addEventListener('click', (ev) => { if (ev.target === formDlg) closeForm(); });
+
+/* Validação ao digitar / ao sair do campo */
+form.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (el.dataset && el.dataset.v) validateInput(el);
+  if (el.closest('.socio-row')) validateSocios();
+});
+form.addEventListener('focusout', (ev) => { if (ev.target.classList) ev.target.classList.add('touched'); });
+
+/* Sócios: adicionar / remover linhas */
+qs('#formFields').addEventListener('click', (ev) => {
+  if (ev.target.closest('[data-add-socio]')) {
+    const list = qs('#sociosList');
+    list.insertAdjacentHTML('beforeend', socioRowHtml());
+    const row = list.lastElementChild;
+    applyMasks(row);
+    qs('.s-nome', row).focus();
+    return;
+  }
+  const del = ev.target.closest('[data-del-socio]');
+  if (del) { del.closest('.socio-row').remove(); validateSocios(); return; }
+
+  /* Foto */
+  if (ev.target.closest('[data-foto-choose]')) { qs('#f_foto').click(); return; }
+  if (ev.target.closest('[data-foto-remove]')) { setFoto(null); }
+});
+
+qs('#formFields').addEventListener('change', async (ev) => {
+  if (ev.target.id !== 'f_foto') return;
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  const errBox = qs('#formError');
+  if (!/^image\//.test(file.type)) { errBox.textContent = 'Escolha um arquivo de imagem (JPG, PNG ou WebP).'; errBox.hidden = false; return; }
+  if (file.size > 10 * 1024 * 1024) { errBox.textContent = 'A imagem é grande demais (máximo de 10 MB).'; errBox.hidden = false; return; }
+  try {
+    errBox.hidden = true;
+    setFoto(await resizeImage(file, 320));
+  } catch {
+    errBox.textContent = 'Não foi possível ler essa imagem. Tente outro arquivo.';
+    errBox.hidden = false;
+  }
+});
+
+function setFoto(dataUrl) {
+  formFoto = dataUrl;
+  const nome = qs('#f_nome') ? qs('#f_nome').value : editing?.item?.nome;
+  qs('#fotoPreview').innerHTML = avatar(nome, formFoto, true);
+  qs('[data-foto-remove]').hidden = !formFoto;
+  qs('[data-foto-choose]').textContent = formFoto ? 'Trocar foto' : 'Escolher foto';
+}
+
+// Recorta no centro (quadrado), reduz para `size` px e comprime em JPEG
+function resizeImage(file, size) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        const sx = (img.naturalWidth - side) / 2;
+        const sy = (img.naturalHeight - side) / 2;
+        const out = Math.min(size, side);
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = out;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; // PNG transparente vira fundo branco no JPEG
+        ctx.fillRect(0, 0, out, out);
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, out, out);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (err) { reject(err); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagem inválida')); };
+    img.src = url;
+  });
+}
 
 function buildPayload(e) {
   const fd = new FormData(form);
   const payload = {};
   flatFields(e.fields).forEach((f) => {
+    if (f.type === 'heading') return;
+    if (f.type === 'foto') { payload[f.name] = formFoto; return; }
+    if (f.type === 'socios') {
+      payload[f.name] = [...form.querySelectorAll('.socio-row')].map((row) => ({
+        nome: qs('.s-nome', row).value.trim(),
+        telefone: qs('.s-tel', row).value.trim() || null,
+        email: qs('.s-email', row).value.trim() || null,
+      })).filter((s) => s.nome || s.telefone || s.email);
+      return;
+    }
     const raw = (fd.get(f.name) ?? '').toString().trim();
     if (f.ref) payload[f.name] = raw ? { id: Number(raw) } : null;
     else if (f.number) payload[f.name] = raw === '' ? 0 : Number(raw);
+    else if (f.type === 'date') payload[f.name] = raw === '' ? null : brToIso(raw);
     else payload[f.name] = raw === '' ? null : raw;
   });
   return payload;
@@ -524,17 +845,18 @@ form.addEventListener('submit', async (ev) => {
   if (!editing) return;
   const { key, item } = editing;
   const e = entities[key];
-  const errBox = $('#formError');
+  const errBox = qs('#formError');
   errBox.hidden = true;
 
   form.querySelectorAll('input, select, textarea').forEach((el) => el.classList.add('touched'));
+  validateAll();
   if (!form.checkValidity()) { form.reportValidity(); return; }
 
   const payload = buildPayload(e);
   const invalid = e.validate && e.validate(payload, item);
   if (invalid) { errBox.textContent = invalid; errBox.hidden = false; return; }
 
-  const btn = $('#formSubmit');
+  const btn = qs('#formSubmit');
   btn.disabled = true;
   btn.textContent = 'Salvando…';
   try {
@@ -554,10 +876,10 @@ form.addEventListener('submit', async (ev) => {
 /* ==========================================================================
    Exclusão
    ========================================================================== */
-const confirmDlg = $('#confirmDialog');
+const confirmDlg = qs('#confirmDialog');
 
 function confirmDelete(text) {
-  $('#confirmText').textContent = text;
+  qs('#confirmText').textContent = text;
   return new Promise((resolve) => {
     confirmDlg.returnValue = '';
     confirmDlg.addEventListener('close', () => resolve(confirmDlg.returnValue === 'ok'), { once: true });
@@ -581,9 +903,9 @@ async function removeItem(key, item) {
 /* ==========================================================================
    Endereço da API + inicialização
    ========================================================================== */
-$('#apiBase').value = API_BASE;
-$('#saveApi').addEventListener('click', () => {
-  const v = $('#apiBase').value.trim().replace(/\/+$/, '');
+qs('#apiBase').value = API_BASE;
+qs('#saveApi').addEventListener('click', () => {
+  const v = qs('#apiBase').value.trim().replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(v)) { toast('Informe um endereço começando com http:// ou https://', 'err'); return; }
   API_BASE = v;
   lsSet('apiBase', v);

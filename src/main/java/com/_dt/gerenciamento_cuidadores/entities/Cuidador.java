@@ -14,6 +14,10 @@ public class Cuidador {
     private String telefone;
     private String cpf;
 
+    // Foto opcional, guardada como data URL (data:image/jpeg;base64,...)
+    @Column(columnDefinition = "LONGTEXT")
+    private String foto;
+
     public Cuidador(int id, String nome, String telefone, String cpf) {
         this.id = id;
         this.nome = nome;
@@ -63,5 +67,13 @@ public class Cuidador {
 
     public void setCpf(String cpf) {
         this.cpf = cpf;
+    }
+
+    public String getFoto() {
+        return foto;
+    }
+
+    public void setFoto(String foto) {
+        this.foto = foto;
     }
 }

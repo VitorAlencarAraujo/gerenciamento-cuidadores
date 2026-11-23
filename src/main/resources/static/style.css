@@ -203,3 +203,62 @@ dialog[open] { animation: pop .14s ease-out; }
 }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ==========================================================================
+   Avatares, foto, sócios e página "Donos e sócios"
+   ========================================================================== */
+dialog#formDialog { width: min(600px, calc(100vw - 24px)); }
+
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-soft); color: var(--brand-dark);
+  font-family: var(--font-head); font-weight: 700; font-size: 14px;
+  object-fit: cover; overflow: hidden;
+}
+.avatar.lg { width: 72px; height: 72px; font-size: 24px; }
+.person { display: flex; align-items: center; gap: 12px; }
+
+.foto-row { display: flex; align-items: center; gap: 16px; }
+.foto-row .btn + .btn { margin-left: 6px; }
+.field .foto-label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+
+.form-sub {
+  font-size: 15px; margin: 6px 0 -4px; padding-top: 12px;
+  border-top: 1px solid var(--line); color: var(--brand-dark);
+}
+.row-21 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+
+.socios-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.socios-head h3 { font-size: 15px; color: var(--brand-dark); }
+.socios-list { display: grid; gap: 10px; margin-top: 10px; }
+.socio-row { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fbfdfc; display: grid; gap: 10px; }
+.socio-row .row-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; color: var(--muted); }
+.socio-row input {
+  width: 100%; padding: 9px 12px; border: 1px solid #c3cfcd; border-radius: 8px; background: #fff;
+}
+.socio-row input:invalid.touched { border-color: var(--danger); }
+.field input[data-v]:invalid.touched, .field input:invalid.touched { border-color: var(--danger); }
+
+.donos { display: grid; gap: 16px; }
+.dono-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.dono-head { display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: #f8fbfa; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.dono-head .info { flex: 1; min-width: 200px; }
+.dono-head h2 { font-size: 18px; }
+.contact { color: var(--muted); font-size: 13.5px; display: flex; gap: 6px 16px; flex-wrap: wrap; margin-top: 2px; }
+.dono-casa { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.dono-casa:last-child { border-bottom: 0; }
+.casa-line { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.casa-line strong { font-size: 15.5px; }
+.casa-line .meta { color: var(--muted); font-size: 13.5px; }
+.socios-box { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.socios-box .lbl { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-right: 4px; }
+.chip { background: var(--brand-soft); color: var(--brand-dark); border-radius: 10px; padding: 6px 12px; font-size: 13.5px; line-height: 1.35; }
+.chip small { display: block; color: #3b6a69; font-size: 12.5px; }
+.no-socios { color: var(--muted); font-size: 13.5px; }
+
+@media (max-width: 860px) {
+  .row-21 { grid-template-columns: 1fr; }
+}
+
+[hidden] { display: none !important; }

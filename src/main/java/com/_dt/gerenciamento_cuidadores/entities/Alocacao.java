@@ -1,5 +1,6 @@
 package com._dt.gerenciamento_cuidadores.entities;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 
@@ -11,10 +12,12 @@ public class Alocacao {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "casa_id", nullable = false)
     private Casa casa;
 
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "cuidador_id", nullable = false)
     private Cuidador cuidador;
