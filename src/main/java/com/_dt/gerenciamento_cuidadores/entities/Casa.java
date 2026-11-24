@@ -1,6 +1,8 @@
 package com._dt.gerenciamento_cuidadores.entities;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,11 +12,15 @@ public class Casa {
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
+
+    @NotBlank
     private String nome;
     private String endereco;
     private String cep;
     private String dono;
     private String donoTelefone;
+
+    @Email
     private String donoEmail;
     private double valor;
 

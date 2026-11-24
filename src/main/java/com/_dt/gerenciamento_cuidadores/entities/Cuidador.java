@@ -1,6 +1,7 @@
 package com._dt.gerenciamento_cuidadores.entities;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
 
 @Entity
 public class Cuidador {
@@ -9,7 +10,7 @@ public class Cuidador {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
-    @Column(nullable = false)
+    @Column(nullable = false) @NotBlank
     private String nome;
     private String telefone;
     private String cpf;
